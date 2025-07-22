@@ -1,0 +1,72 @@
+{
+  "name": "AI幽默短视频自动生成",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "value": "0 10 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Daily Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "id": "trigger1"
+    },
+    {
+      "parameters": {
+        "functionCode": "const topics = ['上班族搞笑日常', '居家办公趣事', '和宠物对话', '购物内心戏', '做饭失败记'];\nconst topic = topics[Math.floor(Math.random() * topics.length)];\nconst script = `标题：${topic}\\n\\n角色A：今天又是充满惊喜的一天！\\n角色B：是啊，特别是意想不到的惊喜...\\n角色A：比如说？\\n角色B：比如咖啡机坏了，备用咖啡也没了...\\n角色A：这确实很惊喜！\\n\\n[结束]`;\nreturn { json: { script_title: topic, script_content: script } };"
+      },
+      "name": "Generate Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 300],
+      "id": "script1"
+    },
+    {
+      "parameters": {
+        "functionCode": "const title = $json.script_title;\nconst content = $json.script_content;\nreturn { json: { title: title, content: content, status: 'ready', platform: 'bilibili' } };"
+      },
+      "name": "Prepare Publishing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [600, 300],
+      "id": "publish1"
+    }
+  ],
+  "connections": {
+    "trigger1": {
+      "main": [
+        [
+          {
+            "node": "Generate Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "script1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Publishing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "staticData": null,
+  "pinData": null,
+  "versionId": "1",
+  "id": "ai_humor_video"
+}

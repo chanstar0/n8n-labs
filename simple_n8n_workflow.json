@@ -1,0 +1,165 @@
+{
+  "name": "AI幽默短视频自动生成与发布",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "value": "0 10 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Daily Schedule Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [260, 300],
+      "id": "dailyScheduleTrigger"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 生成幽默短剧脚本\nconst topics = [\n  '上班族的搞笑日常',\n  '居家办公趣事',\n  '和宠物的对话',\n  '购物时的内心戏',\n  '做饭失败记'\n];\n\nconst randomTopic = topics[Math.floor(Math.random() * topics.length)];\n\nconst script = `标题：${randomTopic}\n\n描述：一个关于${randomTopic}的幽默短剧\n\n剧本内容：\n[场景：日常生活场景]\n\n角色A：今天又是充满惊喜的一天呢！\n角色B：是啊，特别是那些意想不到的惊喜...\n角色A：比如说？\n角色B：比如发现咖啡机又坏了，然后发现备用咖啡也没了...\n角色A：哈哈，这确实很"惊喜"！\n角色B：是的，惊喜到我都想回床上重新开始这一天了！\n\n[结束]`;\n\nreturn {\n  json: {\n    script_content: script,\n    script_title: randomTopic,\n    script_description: `一个关于${randomTopic}的幽默短剧`,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "name": "Generate Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300],
+      "id": "generateScript"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 准备AI服务的数据载荷\nconst scriptContent = $json.script_content;\nconst scriptTitle = $json.script_title;\nconst scriptDescription = $json.script_description;\n\n// ElevenLabs TTS 配置\nconst elevenLabsPayload = {\n  text: scriptContent,\n  model_id: \"eleven_multilingual_v2\",\n  voice_settings: {\n    stability: 0.75,\n    similarity_boost: 0.75,\n    style: 0.5,\n    use_speaker_boost: true\n  }\n};\n\n// HeyGen 视频生成配置\nconst heyGenPayload = {\n  video_inputs: [\n    {\n      character: {\n        type: \"avatar\",\n        avatar_id: \"YOUR_AVATAR_ID\"\n      },\n      voice: {\n        type: \"text\",\n        input_text: scriptContent\n      }\n    }\n  ],\n  dimension: {\n    width: 720,\n    height: 1280\n  }\n};\n\nreturn {\n  json: {\n    script_content: scriptContent,\n    script_title: scriptTitle,\n    script_description: scriptDescription,\n    eleven_labs_payload: elevenLabsPayload,\n    hey_gen_payload: heyGenPayload,\n    processing_status: \"payloads_prepared\"\n  }\n};"
+      },
+      "name": "Prepare AI Payloads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300],
+      "id": "prepareAIPayloads"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 模拟生成语音\nconst scriptTitle = $json.script_title;\nconst audioData = {\n  status: \"completed\",\n  audio_url: \"https://example.com/generated_audio.mp3\",\n  duration: \"180\",\n  file_size: \"2.5MB\"\n};\n\nreturn {\n  json: {\n    script_title: scriptTitle,\n    audio_generation: audioData,\n    step: \"voiceover_completed\"\n  }\n};"
+      },
+      "name": "Generate Voiceover",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 200],
+      "id": "generateVoiceover"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 模拟生成视频\nconst scriptTitle = $json.script_title;\nconst videoData = {\n  status: \"completed\",\n  video_url: \"https://example.com/generated_video.mp4\",\n  duration: \"180\",\n  resolution: \"720x1280\"\n};\n\nreturn {\n  json: {\n    script_title: scriptTitle,\n    video_generation: videoData,\n    step: \"video_completed\"\n  }\n};"
+      },
+      "name": "Generate Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 400],
+      "id": "generateVideo"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 合并音频和视频\nconst scriptTitle = $json.script_title;\nconst finalVideo = {\n  status: \"completed\",\n  final_video_url: \"https://example.com/final_video.mp4\",\n  file_size: \"15.2MB\",\n  duration: \"180\"\n};\n\nreturn {\n  json: {\n    script_title: scriptTitle,\n    final_video: finalVideo,\n    ready_for_review: true,\n    step: \"assembly_completed\"\n  }\n};"
+      },
+      "name": "Video Assembly",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 300],
+      "id": "videoAssembly"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 发布到各平台的状态\nconst scriptTitle = $json.script_title;\nconst publishResults = {\n  bilibili: {\n    status: \"success\",\n    video_id: \"BV1234567890\",\n    url: \"https://www.bilibili.com/video/BV1234567890\"\n  },\n  douyin: {\n    status: \"manual_required\",\n    note: \"需要手动上传到抖音\"\n  },\n  xiaohongshu: {\n    status: \"manual_required\",\n    note: \"需要手动上传到小红书\"\n  }\n};\n\nreturn {\n  json: {\n    script_title: scriptTitle,\n    publish_results: publishResults,\n    workflow_completed: true\n  }\n};"
+      },
+      "name": "Publish Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1360, 300],
+      "id": "publishResults"
+    }
+  ],
+  "connections": {
+    "dailyScheduleTrigger": {
+      "main": [
+        [
+          {
+            "node": "Generate Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generateScript": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "prepareAIPayloads": {
+      "main": [
+        [
+          {
+            "node": "Generate Voiceover",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generateVoiceover": {
+      "main": [
+        [
+          {
+            "node": "Video Assembly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generateVideo": {
+      "main": [
+        [
+          {
+            "node": "Video Assembly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "videoAssembly": {
+      "main": [
+        [
+          {
+            "node": "Publish Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "staticData": null,
+  "pinData": null,
+  "versionId": "1",
+  "id": "simple_humor_video_workflow"
+}

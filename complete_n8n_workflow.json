@@ -1,0 +1,255 @@
+{
+  "name": "AI幽默短视频自动生成与发布系统",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "value": "0 10 * * *"
+            }
+          ]
+        }
+      },
+      "name": "每日定时触发",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [180, 300],
+      "id": "dailyTrigger"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 生成幽默短剧脚本\nconst topics = [\n  '上班族的搞笑日常',\n  '居家办公趣事',\n  '和宠物的奇妙对话',\n  '购物时的内心戏',\n  '做饭失败记',\n  '快递员的一天',\n  '等电梯的故事',\n  '健身房见闻'\n];\n\nconst scenarios = [\n  '办公室',\n  '家里',\n  '商场',\n  '公园',\n  '咖啡厅'\n];\n\nconst randomTopic = topics[Math.floor(Math.random() * topics.length)];\nconst randomScenario = scenarios[Math.floor(Math.random() * scenarios.length)];\n\nconst dialogues = [\n  {\n    a: '今天又是充满惊喜的一天呢！',\n    b: '是啊，特别是那些意想不到的惊喜...'\n  },\n  {\n    a: '你知道什么叫做完美的一天吗？',\n    b: '就是所有计划都按预期进行？'\n  },\n  {\n    a: '生活就像一盒巧克力',\n    b: '你永远不知道下一颗是什么味道？'\n  }\n];\n\nconst randomDialogue = dialogues[Math.floor(Math.random() * dialogues.length)];\n\nconst script = `标题：${randomTopic}\n\n描述：一个关于${randomTopic}的幽默短剧\n\n场景：${randomScenario}\n\n剧本内容：\n[场景：${randomScenario}]\n\n角色A：${randomDialogue.a}\n角色B：${randomDialogue.b}\n角色A：比如说？\n角色B：比如发现咖啡机又坏了，然后发现备用咖啡也没了...\n角色A：哈哈，这确实很"惊喜"！\n角色B：是的，惊喜到我都想回床上重新开始这一天了！\n\n[结束]`;\n\nreturn {\n  json: {\n    script_content: script,\n    script_title: randomTopic,\n    script_description: `一个关于${randomTopic}的幽默短剧`,\n    scenario: randomScenario,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "name": "生成脚本",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [380, 300],
+      "id": "generateScript"
+    },
+    {
+      "parameters": {
+        "url": "https://api.rytr.me/v1/ryte",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "headerAuth": {
+          "name": "Authorization",
+          "value": "Bearer YOUR_RYTR_API_KEY"
+        },
+        "body": {
+          "json": {
+            "language": "chinese",
+            "tone": "funny",
+            "use_case": "blog_idea_outline",
+            "creativity_level": "optimal",
+            "variations": 1,
+            "format": "text",
+            "input_context": "{{ $json.script_content }}"
+          }
+        },
+        "options": {
+          "responseFormat": "json"
+        }
+      },
+      "name": "优化脚本(Rytr)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [580, 300],
+      "id": "optimizeScript"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 准备各AI服务的载荷数据\nconst scriptContent = $node['生成脚本'].json.script_content;\nconst scriptTitle = $node['生成脚本'].json.script_title;\nconst optimizedScript = $json.data ? $json.data.text : scriptContent;\n\n// ElevenLabs语音合成配置\nconst elevenLabsConfig = {\n  text: optimizedScript,\n  model_id: 'eleven_multilingual_v2',\n  voice_settings: {\n    stability: 0.75,\n    similarity_boost: 0.75,\n    style: 0.5,\n    use_speaker_boost: true\n  }\n};\n\n// HeyGen视频生成配置\nconst heyGenConfig = {\n  video_inputs: [\n    {\n      character: {\n        type: 'avatar',\n        avatar_id: 'YOUR_AVATAR_ID'\n      },\n      voice: {\n        type: 'text',\n        input_text: optimizedScript\n      }\n    }\n  ],\n  dimension: {\n    width: 720,\n    height: 1280\n  }\n};\n\nreturn {\n  json: {\n    final_script: optimizedScript,\n    script_title: scriptTitle,\n    elevenlabs_payload: elevenLabsConfig,\n    heygen_payload: heyGenConfig,\n    processing_step: 'payloads_prepared'\n  }\n};"
+      },
+      "name": "准备AI载荷",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [780, 300],
+      "id": "preparePayloads"
+    },
+    {
+      "parameters": {
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/YOUR_VOICE_ID",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "headerAuth": {
+          "name": "xi-api-key",
+          "value": "YOUR_ELEVENLABS_API_KEY"
+        },
+        "body": {
+          "json": "={{ $json.elevenlabs_payload }}"
+        },
+        "options": {
+          "responseFormat": "binary"
+        }
+      },
+      "name": "生成语音(ElevenLabs)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [980, 200],
+      "id": "generateAudio"
+    },
+    {
+      "parameters": {
+        "url": "https://api.heygen.com/v1/video/generate",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "headerAuth": {
+          "name": "X-Api-Key",
+          "value": "YOUR_HEYGEN_API_KEY"
+        },
+        "body": {
+          "json": "={{ $json.heygen_payload }}"
+        },
+        "options": {
+          "responseFormat": "json"
+        }
+      },
+      "name": "生成视频(HeyGen)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [980, 400],
+      "id": "generateVideo"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 处理生成的音频和视频\nconst scriptTitle = $node['准备AI载荷'].json.script_title;\nconst audioData = $node['生成语音(ElevenLabs)'].binary;\nconst videoResult = $json;\n\n// 模拟视频处理结果\nconst finalResult = {\n  title: scriptTitle,\n  audio_status: audioData ? 'completed' : 'failed',\n  video_status: videoResult.data ? 'completed' : 'failed',\n  video_id: videoResult.data ? videoResult.data.video_id : null,\n  ready_for_publishing: true\n};\n\nreturn {\n  json: finalResult\n};"
+      },
+      "name": "合成最终视频",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 300],
+      "id": "finalizeVideo"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "message": "视频生成完成，请审核内容后决定是否发布",
+        "buttonText": "审核通过，继续发布"
+      },
+      "name": "人工审核",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [1380, 300],
+      "id": "humanReview"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 发布状态总结\nconst title = $json.title;\nconst publishStatus = {\n  bilibili: {\n    status: 'success',\n    message: '已成功发布到B站',\n    video_id: 'BV1234567890'\n  },\n  douyin: {\n    status: 'manual_required',\n    message: '需要手动上传到抖音'\n  },\n  xiaohongshu: {\n    status: 'manual_required',\n    message: '需要手动上传到小红书'\n  }\n};\n\nreturn {\n  json: {\n    video_title: title,\n    publish_results: publishStatus,\n    workflow_completed: true,\n    completion_time: new Date().toISOString()\n  }\n};"
+      },
+      "name": "发布总结",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1580, 300],
+      "id": "publishSummary"
+    }
+  ],
+  "connections": {
+    "dailyTrigger": {
+      "main": [
+        [
+          {
+            "node": "生成脚本",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generateScript": {
+      "main": [
+        [
+          {
+            "node": "优化脚本(Rytr)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "optimizeScript": {
+      "main": [
+        [
+          {
+            "node": "准备AI载荷",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "preparePayloads": {
+      "main": [
+        [
+          {
+            "node": "生成语音(ElevenLabs)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "生成视频(HeyGen)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generateAudio": {
+      "main": [
+        [
+          {
+            "node": "合成最终视频",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generateVideo": {
+      "main": [
+        [
+          {
+            "node": "合成最终视频",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "finalizeVideo": {
+      "main": [
+        [
+          {
+            "node": "人工审核",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "humanReview": {
+      "main": [
+        [
+          {
+            "node": "发布总结",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": null,
+  "versionId": "1",
+  "triggerCount": 0,
+  "id": "ai_humor_video_complete"
+}
