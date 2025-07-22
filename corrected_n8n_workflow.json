@@ -1,0 +1,329 @@
+{
+  "name": "AI幽默短视频自动生成与发布",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "value": "0 10 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Daily Schedule Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [260, 300],
+      "id": "dailyScheduleTrigger"
+    },
+    {
+      "parameters": {
+        "url": "https://api.rytr.me/v1/ryte",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "headerAuth": {
+          "name": "Authorization",
+          "value": "Bearer {{ $connections.rytrApi.apiKey }}"
+        },
+        "body": {
+          "json": {
+            "language": "chinese",
+            "tone": "funny",
+            "use_case": "blog_idea_outline",
+            "creativity_level": "optimal",
+            "variations": 1,
+            "userId": "YOUR_USER_ID",
+            "format": "text",
+            "input_context": "生成一个3-5分钟的中文幽默短剧脚本，适合个人IP打造。要求：1）情节简单有趣，有明确的笑点；2）角色设定清晰；3）对话生动自然；4）适合短视频平台传播；5）体现个人特色和幽默风格。可以包含日常生活场景、办公室趣事、或轻松的社交互动。"
+          }
+        },
+        "options": {
+          "responseFormat": "json"
+        }
+      },
+      "name": "Generate Script (Rytr)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [480, 300],
+      "id": "generateScriptRytr",
+      "credentials": {
+        "rytrApi": {
+          "id": "YOUR_RYTR_API_KEY_CREDENTIAL_ID",
+          "name": "Rytr API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// 从Rytr API响应中提取脚本内容\nconst scriptContent = $json.data.text;\n\n// 提取脚本中的标题和描述，或生成默认值\nconst scriptTitleMatch = scriptContent.match(/标题：(.+?)\\n/);\nconst scriptDescriptionMatch = scriptContent.match(/描述：(.+?)\\n/);\n\nconst scriptTitle = scriptTitleMatch ? scriptTitleMatch[1].trim() : 'AI幽默短剧：日常奇遇';\nconst scriptDescription = scriptDescriptionMatch ? scriptDescriptionMatch[1].trim() : scriptContent.substring(0, 100) + '...';\n\n// ElevenLabs TTS Payload\nconst elevenLabsPayload = {\n  text: scriptContent,\n  model_id: \"eleven_multilingual_v2\",\n  voice_settings: {\n    stability: 0.75,\n    similarity_boost: 0.75,\n    style: 0.5,\n    use_speaker_boost: true\n  },\n  voice_id: \"YOUR_ELEVENLABS_VOICE_ID\"\n};\n\n// HeyGen Video Generation Payload\nconst heyGenPayload = {\n  video_inputs: [\n    {\n      character: {\n        type: \"avatar\",\n        avatar_id: \"YOUR_HEYGEN_AVATAR_ID\"\n      },\n      voice: {\n        type: \"text\",\n        input_text: scriptContent,\n        voice_id: \"YOUR_HEYGEN_VOICE_ID\"\n      }\n    }\n  ],\n  dimension: {\n    width: 720,\n    height: 1280\n  }\n};\n\nreturn {\n  json: {\n    script_content: scriptContent,\n    script_title: scriptTitle,\n    script_description: scriptDescription,\n    eleven_labs_payload: elevenLabsPayload,\n    hey_gen_payload: heyGenPayload\n  }\n};"
+      },
+      "name": "Prepare AI Payloads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300],
+      "id": "prepareAIPayloads"
+    },
+    {
+      "parameters": {
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/{{ $json.eleven_labs_payload.voice_id }}",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "headerAuth": {
+          "name": "xi-api-key",
+          "value": "{{ $connections.elevenLabsApi.apiKey }}"
+        },
+        "body": {
+          "json": "={{ $json.eleven_labs_payload }}"
+        },
+        "options": {
+          "responseFormat": "binary"
+        }
+      },
+      "name": "Generate Voiceover (ElevenLabs)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [920, 200],
+      "id": "generateVoiceoverElevenLabs",
+      "credentials": {
+        "elevenLabsApi": {
+          "id": "YOUR_ELEVENLABS_API_KEY_CREDENTIAL_ID",
+          "name": "ElevenLabs API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.heygen.com/v1/video/generate",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "headerAuth": {
+          "name": "X-Api-Key",
+          "value": "{{ $connections.heyGenApi.apiKey }}"
+        },
+        "body": {
+          "json": "={{ $json.hey_gen_payload }}"
+        },
+        "options": {
+          "responseFormat": "json"
+        }
+      },
+      "name": "Generate Video (HeyGen)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [920, 400],
+      "id": "generateVideoHeyGen",
+      "credentials": {
+        "heyGenApi": {
+          "id": "YOUR_HEYGEN_API_KEY_CREDENTIAL_ID",
+          "name": "HeyGen API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const heyGenVideoId = $node[\"Generate Video (HeyGen)\"].json.data.video_id;\n\n// 获取ElevenLabs生成的音频二进制数据\nconst elevenLabsAudio = $node[\"Generate Voiceover (ElevenLabs)\"].binary;\nconst audioFileName = elevenLabsAudio.data.fileName || 'voiceover.mp3';\n\n// 获取脚本信息\nconst scriptTitle = $json.script_title;\nconst scriptDescription = $json.script_description;\n\n// 返回处理结果\nreturn {\n  json: {\n    video_id: heyGenVideoId,\n    audio_file: audioFileName,\n    script_title: scriptTitle,\n    script_description: scriptDescription,\n    status: 'ready_for_review'\n  },\n  binary: {\n    output_video_file: {\n      data: 'placeholder_video_data',\n      fileName: 'final_video.mp4',\n      fileType: 'video/mp4'\n    }\n  }\n};"
+      },
+      "name": "Video Edit & Assemble (FFmpeg)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 300],
+      "id": "videoEditAssembleFFmpeg"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "message": "请审核生成的视频内容（脚本、旁白、视频画面），确保幽默感、个人风格和合规性。确认无误后，点击"继续"进行发布。",
+        "buttonText": "审核通过，继续发布"
+      },
+      "name": "Human Review & Approval",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [1360, 300],
+      "id": "humanReviewApproval"
+    },
+    {
+      "parameters": {
+        "url": "https://api.bilibili.com/x/ugc/creative/web/upload/v2",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "headerAuth": {
+          "name": "Authorization",
+          "value": "Bearer {{ $connections.bilibiliOAuth.accessToken }}"
+        },
+        "body": {
+          "mode": "formdata",
+          "formData": {
+            "parameters": [
+              {
+                "name": "video_file",
+                "type": "file",
+                "value": "={{ $node[\"Video Edit & Assemble (FFmpeg)\"].binary.output_video_file }}"
+              },
+              {
+                "name": "title",
+                "value": "AI幽默短剧系列：{{ $json.script_title }}"
+              },
+              {
+                "name": "desc",
+                "value": "{{ $json.script_description }} #AI短剧 #幽默 #搞笑 #个人IP"
+              },
+              {
+                "name": "tag",
+                "value": "搞笑,幽默,AI,短剧,情景剧,个人IP"
+              },
+              {
+                "name": "copyright",
+                "value": "1"
+              }
+            ]
+          }
+        },
+        "options": {
+          "responseFormat": "json"
+        }
+      },
+      "name": "Publish to Bilibili",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1580, 200],
+      "id": "publishToBilibili",
+      "credentials": {
+        "bilibiliOAuth": {
+          "id": "YOUR_BILIBILI_OAUTH_CREDENTIAL_ID",
+          "name": "Bilibili OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// 抖音对个人开发者视频上传API支持有限，通常需要企业或机构认证（蓝V认证）。\n// 个人用户直接通过API自动化上传视频的明确文档尚不清晰。\n// 替代方案：\n// 1. **人工上传：** 最直接可靠，但非自动化。\n// 2. **浏览器自动化：** 使用n8n的Browser Automation节点，模拟登录和上传操作。\n//    - 成本：高开发和维护成本，易受网页结构变化影响，稳定性差。\n//    - 风险：可能违反平台服务条款，导致账号封禁。\n// 3. **非官方API：** 存在一些第三方提供的非官方API，但风险极高。\n//\n// 建议初期对抖音采取人工发布，或在充分评估风险和投入后考虑浏览器自动化。\n\nreturn {\n  json: {\n    status: '抖音发布需要人工干预或复杂的浏览器自动化，因为个人视频上传缺乏官方API支持。',\n    platform: 'douyin',\n    action_required: 'manual_upload'\n  }\n};"
+      },
+      "name": "Publish to Douyin (Manual/Browser Automation)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1580, 300],
+      "id": "publishToDouyin"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 小红书目前没有针对个人视频上传的公开官方API。\n// 现有工具如Autoxhs主要用于图文内容生成和发布，且通过浏览器自动化实现。\n// 替代方案：\n// 1. **人工上传：** 最直接可靠，但非自动化。\n// 2. **浏览器自动化：** 类似抖音，使用n8n的Browser Automation节点模拟操作。\n//    - 成本：高开发和维护成本，易受网页结构变化影响，稳定性差。\n//    - 风险：可能违反平台服务条款，导致账号封禁。\n//\n// 此外，小红书对内容有严格的审核，存在高风险词汇列表。\n// 自动化生成内容需确保合规性，建议进行人工审核。\n\nreturn {\n  json: {\n    status: '小红书发布需要人工干预或复杂的浏览器自动化，因为个人视频上传缺乏官方API支持。',\n    platform: 'xiaohongshu',\n    action_required: 'manual_upload'\n  }\n};"
+      },
+      "name": "Publish to Xiaohongshu (Manual/Browser Automation)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1580, 400],
+      "id": "publishToXiaohongshu"
+    }
+  ],
+  "connections": {
+    "dailyScheduleTrigger": {
+      "main": [
+        [
+          {
+            "node": "Generate Script (Rytr)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generateScriptRytr": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "prepareAIPayloads": {
+      "main": [
+        [
+          {
+            "node": "Generate Voiceover (ElevenLabs)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Video (HeyGen)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generateVoiceoverElevenLabs": {
+      "main": [
+        [
+          {
+            "node": "Video Edit & Assemble (FFmpeg)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generateVideoHeyGen": {
+      "main": [
+        [
+          {
+            "node": "Video Edit & Assemble (FFmpeg)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "videoEditAssembleFFmpeg": {
+      "main": [
+        [
+          {
+            "node": "Human Review & Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "humanReviewApproval": {
+      "main": [
+        [
+          {
+            "node": "Publish to Bilibili",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Publish to Douyin (Manual/Browser Automation)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Publish to Xiaohongshu (Manual/Browser Automation)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": null,
+  "versionId": "1",
+  "triggerCount": 0,
+  "id": "automated_humor_video_publishing",
+  "meta": {
+    "instanceId": "your_n8n_instance_id"
+  }
+}
