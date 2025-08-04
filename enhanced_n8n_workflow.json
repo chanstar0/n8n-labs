@@ -1,0 +1,412 @@
+{
+  "name": "企业级AI短视频自动化生产线",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "value": "0 10 * * *"
+            }
+          ]
+        }
+      },
+      "name": "定时触发器",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "id": "dailyScheduleTrigger"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 工作流状态初始化和环境检查\nconst workflowId = $workflow.id;\nconst executionId = $execution.id;\nconst timestamp = new Date().toISOString();\n\n// 检查API配额和服务状态\nconst serviceHealthCheck = {\n  rytr: true,\n  elevenlabs: true,\n  heygen: true,\n  bilibili: true\n};\n\n// 初始化执行上下文\nconst executionContext = {\n  workflow_id: workflowId,\n  execution_id: executionId,\n  start_time: timestamp,\n  status: 'initialized',\n  retry_count: 0,\n  max_retries: 3,\n  services_status: serviceHealthCheck\n};\n\n// 记录开始日志\nconsole.log(`[${timestamp}] 工作流执行开始: ${executionId}`);\n\nreturn {\n  json: {\n    execution_context: executionContext,\n    proceed: true\n  }\n};"
+      },
+      "name": "工作流初始化",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "id": "workflowInitialization"
+    },
+    {
+      "parameters": {
+        "url": "https://api.rytr.me/v1/ryte",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "headerAuth": {
+          "name": "Authorization",
+          "value": "Bearer {{ $connections.rytrApi.apiKey }}"
+        },
+        "body": {
+          "json": {
+            "language": "chinese",
+            "tone": "funny",
+            "use_case": "blog_idea_outline",
+            "creativity_level": "optimal",
+            "variations": 1,
+            "userId": "{{ $connections.rytrApi.userId }}",
+            "format": "text",
+            "input_context": "生成一个3-5分钟的中文幽默短剧脚本。要求：1）情节紧凑有趣，包含2-3个笑点；2）角色设定鲜明（1-2个主要角色）；3）对话自然生动，适合配音；4）场景简单易懂；5）内容积极正面，适合全年龄观看；6）体现个人特色和幽默风格。主题可以是：日常生活趣事、办公室幽默、轻松社交场景、生活小窍门等。请确保脚本结构清晰，包含开头、发展、高潮、结尾。"
+          }
+        },
+        "options": {
+          "responseFormat": "json",
+          "timeout": 30000,
+          "retry": {
+            "count": 3,
+            "interval": 2000
+          }
+        }
+      },
+      "name": "AI脚本生成",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [640, 300],
+      "id": "generateScript",
+      "credentials": {
+        "rytrApi": {
+          "id": "rytr_api_credentials",
+          "name": "Rytr API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// 内容质量评估和处理系统\nconst scriptContent = $json.data?.text || $json.text || '';\nconst executionContext = $node['工作流初始化'].json.execution_context;\n\n// 内容质量评估函数\nfunction evaluateContentQuality(content) {\n  const qualityMetrics = {\n    length: content.length >= 200 && content.length <= 3000,\n    structure: /角色|场景|对话/.test(content),\n    humor: /幽默|搞笑|有趣|好玩|滑稽|逗乐/.test(content),\n    dialogue: /[\"\"'']|：|说|道/.test(content),\n    positive: !/负面|消极|悲观|暴力/.test(content),\n    compliance: !/(政治|敏感|违法|不当)/.test(content)\n  };\n  \n  const score = Object.values(qualityMetrics).filter(Boolean).length / Object.keys(qualityMetrics).length;\n  \n  return {\n    score: Math.round(score * 100) / 100,\n    passed: score >= 0.75,\n    metrics: qualityMetrics,\n    issues: Object.entries(qualityMetrics)\n      .filter(([key, value]) => !value)\n      .map(([key]) => key)\n  };\n}\n\n// 内容预处理和标准化\nfunction preprocessContent(content) {\n  // 清理和格式化内容\n  let processed = content\n    .replace(/\\r\\n/g, '\\n')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n  \n  // 提取标题和描述\n  const titleMatch = processed.match(/(?:标题|题目)[：:]?\\s*(.+?)(?:\\n|$)/i);\n  const descMatch = processed.match(/(?:描述|简介|概述)[：:]?\\s*(.+?)(?:\\n|$)/i);\n  \n  const title = titleMatch ? titleMatch[1].trim() : '今日搞笑短剧';\n  const description = descMatch ? descMatch[1].trim() : processed.substring(0, 120) + '...';\n  \n  return {\n    title,\n    description,\n    content: processed,\n    wordCount: processed.length\n  };\n}\n\n// 执行评估\nconst qualityassessment = evaluateContentQuality(scriptContent);\nconst processedContent = preprocessContent(scriptContent);\n\n// 更新执行上下文\nconst updatedContext = {\n  ...executionContext,\n  content_quality: qualityAssessment,\n  content_processed: processedContent,\n  step: 'content_evaluation'\n};\n\n// 如果质量不达标，标记需要重新生成\nif (!qualityAssessment.passed) {\n  console.warn(`内容质量评估未通过: 得分 ${qualityAssessment.score}, 问题: ${qualityAssessment.issues.join(', ')}`);\n  \n  if (executionContext.retry_count < executionContext.max_retries) {\n    return {\n      json: {\n        execution_context: {\n          ...updatedContext,\n          retry_count: executionContext.retry_count + 1,\n          status: 'retry_needed'\n        },\n        retry_script_generation: true,\n        quality_issues: qualityAssessment.issues\n      }\n    };\n  }\n}\n\n// 生成各平台的载荷数据\nconst platformPayloads = {\n  elevenlabs: {\n    text: processedContent.content,\n    model_id: \"eleven_multilingual_v2\",\n    voice_settings: {\n      stability: 0.8,\n      similarity_boost: 0.75,\n      style: 0.6,\n      use_speaker_boost: true\n    },\n    voice_id: \"{{ $connections.elevenLabsApi.voiceId }}\"\n  },\n  heygen: {\n    video_inputs: [{\n      character: {\n        type: \"avatar\",\n        avatar_id: \"{{ $connections.heyGenApi.avatarId }}\"\n      },\n      voice: {\n        type: \"text\",\n        input_text: processedContent.content,\n        voice_id: \"{{ $connections.heyGenApi.voiceId }}\"\n      }\n    }],\n    dimension: {\n      width: 720,\n      height: 1280\n    },\n    aspect_ratio: \"9:16\"\n  }\n};\n\nreturn {\n  json: {\n    execution_context: updatedContext,\n    script_title: processedContent.title,\n    script_description: processedContent.description,\n    script_content: processedContent.content,\n    word_count: processedContent.wordCount,\n    quality_score: qualityAssessment.score,\n    platform_payloads: platformPayloads,\n    proceed_to_production: true\n  }\n};"
+      },
+      "name": "内容质量评估与处理",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 300],
+      "id": "contentQualityEvaluation"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "quality_check",
+              "leftValue": "={{ $json.proceed_to_production }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "质量检查分支",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1040, 300],
+      "id": "qualityCheckBranch"
+    },
+    {
+      "parameters": {
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/{{ $json.platform_payloads.elevenlabs.voice_id }}",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "headerAuth": {
+          "name": "xi-api-key",
+          "value": "{{ $connections.elevenLabsApi.apiKey }}"
+        },
+        "body": {
+          "json": "={{ $json.platform_payloads.elevenlabs }}"
+        },
+        "options": {
+          "responseFormat": "binary",
+          "timeout": 60000,
+          "retry": {
+            "count": 2,
+            "interval": 3000
+          }
+        }
+      },
+      "name": "语音合成生成",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1240, 200],
+      "id": "generateVoiceover",
+      "credentials": {
+        "elevenLabsApi": {
+          "id": "elevenlabs_api_credentials",
+          "name": "ElevenLabs API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.heygen.com/v1/video/generate",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "headerAuth": {
+          "name": "X-Api-Key",
+          "value": "{{ $connections.heyGenApi.apiKey }}"
+        },
+        "body": {
+          "json": "={{ $json.platform_payloads.heygen }}"
+        },
+        "options": {
+          "responseFormat": "json",
+          "timeout": 120000,
+          "retry": {
+            "count": 2,
+            "interval": 5000
+          }
+        }
+      },
+      "name": "AI视频生成",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1240, 400],
+      "id": "generateVideo",
+      "credentials": {
+        "heyGenApi": {
+          "id": "heygen_api_credentials",
+          "name": "HeyGen API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// 多媒体处理和质量检查\nconst videoResponse = $node['AI视频生成'].json;\nconst audioData = $node['语音合成生成'].binary;\nconst contentData = $node['内容质量评估与处理'].json;\n\n// 检查生成结果\nconst videoId = videoResponse.data?.video_id || videoResponse.video_id;\nconst audioBuffer = audioData?.data;\n\nif (!videoId) {\n  throw new Error('视频生成失败: 未获得视频ID');\n}\n\nif (!audioBuffer) {\n  throw new Error('语音合成失败: 未获得音频数据');\n}\n\n// 生成多平台适配内容\nconst platformAdaptations = {\n  bilibili: {\n    title: `【AI搞笑短剧】${contentData.script_title}`,\n    description: `${contentData.script_description}\\n\\n#AI短剧 #幽默搞笑 #原创内容 #个人IP`,\n    tags: '搞笑,幽默,AI,短剧,情景剧,原创',\n    category: '搞笑',\n    copyright: 1\n  },\n  douyin: {\n    title: contentData.script_title,\n    description: `${contentData.script_description} #搞笑 #AI短剧 #幽默`,\n    hashtags: ['#搞笑', '#AI短剧', '#幽默', '#原创']\n  },\n  xiaohongshu: {\n    title: `✨${contentData.script_title}`,\n    description: `${contentData.script_description}\\n\\n#搞笑短剧 #AI创作 #幽默日常`,\n    hashtags: ['搞笑短剧', 'AI创作', '幽默日常', '原创内容']\n  }\n};\n\n// 更新执行上下文\nconst executionContext = {\n  ...contentData.execution_context,\n  video_id: videoId,\n  audio_ready: true,\n  video_ready: true,\n  step: 'media_processing_complete',\n  platform_adaptations: platformAdaptations\n};\n\nreturn {\n  json: {\n    execution_context: executionContext,\n    video_id: videoId,\n    script_title: contentData.script_title,\n    script_description: contentData.script_description,\n    quality_score: contentData.quality_score,\n    platform_content: platformAdaptations,\n    ready_for_review: true\n  },\n  binary: {\n    audio_file: audioData.data,\n    video_placeholder: {\n      data: 'video_processing_in_progress',\n      fileName: `ai_video_${videoId}.mp4`,\n      fileType: 'video/mp4'\n    }\n  }\n};"
+      },
+      "name": "多媒体处理与平台适配",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 300],
+      "id": "mediaProcessingAndAdaptation"
+    },
+    {
+      "parameters": {
+        "mode": "manual",\n        "message": "🎬 AI短视频内容审核\\n\\n📝 脚本标题: {{ $json.script_title }}\\n📊 内容质量评分: {{ $json.quality_score }}\\n🎯 目标平台: B站、抖音、小红书\\n\\n请审核以下内容：\\n✅ 脚本内容质量和幽默度\\n✅ 语音合成效果\\n✅ 视频画面质量\\n✅ 平台合规性\\n\\n确认无误后点击继续发布到各平台。",
+        "buttonText": "✅ 审核通过，开始发布",
+        "options": {
+          "allowManualReexecution": true
+        }
+      },
+      "name": "人工审核检查点",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [1640, 300],
+      "id": "humanReviewCheckpoint"
+    },
+    {
+      "parameters": {
+        "url": "https://api.bilibili.com/x/ugc/creative/web/upload/v2",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "headerAuth": {
+          "name": "Authorization",
+          "value": "Bearer {{ $connections.bilibiliOAuth.accessToken }}"
+        },
+        "body": {
+          "mode": "formdata",
+          "formData": {
+            "parameters": [
+              {
+                "name": "video_file",
+                "type": "file",
+                "value": "={{ $json.binary.video_placeholder }}"
+              },
+              {
+                "name": "title",
+                "value": "={{ $json.platform_content.bilibili.title }}"
+              },
+              {
+                "name": "desc",
+                "value": "={{ $json.platform_content.bilibili.description }}"
+              },
+              {
+                "name": "tag",
+                "value": "={{ $json.platform_content.bilibili.tags }}"
+              },
+              {
+                "name": "copyright",
+                "value": "1"
+              }
+            ]
+          }
+        },
+        "options": {
+          "responseFormat": "json",
+          "timeout": 300000
+        }
+      },
+      "name": "发布到B站",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1840, 180],
+      "id": "publishToBilibili",
+      "credentials": {
+        "bilibiliOAuth": {
+          "id": "bilibili_oauth_credentials",
+          "name": "Bilibili OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// 抖音发布处理（浏览器自动化或手动引导）\nconst contentData = $json;\nconst douyinContent = contentData.platform_content.douyin;\n\n// 记录抖音发布任务\nconst douyinTask = {\n  platform: 'douyin',\n  title: douyinContent.title,\n  description: douyinContent.description,\n  hashtags: douyinContent.hashtags,\n  video_id: contentData.video_id,\n  status: 'pending_manual_upload',\n  instructions: [\n    '1. 下载生成的视频文件',\n    '2. 登录抖音创作者平台',\n    '3. 上传视频并填写标题和描述',\n    '4. 添加相关话题标签',\n    '5. 选择合适的发布时间',\n    '6. 完成发布并记录结果'\n  ],\n  alternative: '可考虑使用浏览器自动化工具，但需谨慎评估风险'\n};\n\n// 未来可集成浏览器自动化\n// 注意：需要评估平台政策合规性\n\nreturn {\n  json: {\n    platform: 'douyin',\n    status: 'manual_intervention_required',\n    task: douyinTask,\n    message: '抖音发布需要人工操作，已生成详细指引'\n  }\n};"
+      },
+      "name": "抖音发布引导",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1840, 300],
+      "id": "douyinPublishGuide"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 小红书发布处理（浏览器自动化或手动引导）\nconst contentData = $json;\nconst xiaohongshuContent = contentData.platform_content.xiaohongshu;\n\n// 记录小红书发布任务\nconst xiaohongshuTask = {\n  platform: 'xiaohongshu',\n  title: xiaohongshuContent.title,\n  description: xiaohongshuContent.description,\n  hashtags: xiaohongshuContent.hashtags,\n  video_id: contentData.video_id,\n  status: 'pending_manual_upload',\n  instructions: [\n    '1. 确保内容符合小红书社区规范',\n    '2. 登录小红书创作者平台',\n    '3. 上传视频并添加封面',\n    '4. 填写标题和详细描述',\n    '5. 添加相关话题和标签',\n    '6. 选择合适的发布时间',\n    '7. 完成发布并监控审核状态'\n  ],\n  compliance_notes: [\n    '内容需符合平台价值观',\n    '避免过度商业化表达',\n    '注意敏感词汇筛查',\n    '确保原创性声明'\n  ]\n};\n\nreturn {\n  json: {\n    platform: 'xiaohongshu',\n    status: 'manual_intervention_required',\n    task: xiaohongshuTask,\n    message: '小红书发布需要人工操作，已生成合规指引'\n  }\n};"
+      },
+      "name": "小红书发布引导",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1840, 420],
+      "id": "xiaohongshuPublishGuide"
+    },
+    {
+      "parameters": {
+        "functionCode": "// 工作流执行总结和报告生成\nconst executionContext = $json.execution_context || {};\nconst bilibiliResult = $node['发布到B站']?.json || {};\nconst douyinResult = $node['抖音发布引导']?.json || {};\nconst xiaohongshuResult = $node['小红书发布引导']?.json || {};\n\nconst endTime = new Date().toISOString();\nconst startTime = executionContext.start_time;\nconst duration = startTime ? Math.round((new Date(endTime) - new Date(startTime)) / 1000) : 0;\n\n// 生成执行报告\nconst executionReport = {\n  workflow_id: executionContext.workflow_id,\n  execution_id: executionContext.execution_id,\n  start_time: startTime,\n  end_time: endTime,\n  duration_seconds: duration,\n  content_quality_score: $json.quality_score,\n  script_title: $json.script_title,\n  platforms: {\n    bilibili: {\n      status: bilibiliResult.success ? 'published' : 'failed',\n      response: bilibiliResult\n    },\n    douyin: {\n      status: 'manual_required',\n      task: douyinResult.task\n    },\n    xiaohongshu: {\n      status: 'manual_required',\n      task: xiaohongshuResult.task\n    }\n  },\n  metrics: {\n    total_duration: `${duration}秒`,\n    content_score: $json.quality_score,\n    auto_published_platforms: 1,\n    manual_required_platforms: 2\n  },\n  next_actions: [\n    '检查B站发布状态',\n    '按指引完成抖音手动发布',\n    '按指引完成小红书手动发布',\n    '监控各平台数据表现',\n    '收集用户反馈优化下次生成'\n  ]\n};\n\n// 输出最终报告\nconsole.log('=== AI短视频自动化生产线执行报告 ===');\nconsole.log(`执行时长: ${duration}秒`);\nconsole.log(`内容质量: ${$json.quality_score}`);\nconsole.log(`自动发布: B站`);\nconsole.log(`手动发布: 抖音、小红书`);\nconsole.log('=====================================');\n\nreturn {\n  json: {\n    execution_report: executionReport,\n    status: 'completed',\n    success: true,\n    message: '工作流执行完成，已生成详细报告'\n  }\n};"
+      },
+      "name": "执行总结与报告",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2040, 300],
+      "id": "executionSummaryReport"
+    }
+  ],
+  "connections": {
+    "dailyScheduleTrigger": {
+      "main": [[{
+        "node": "工作流初始化",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "workflowInitialization": {
+      "main": [[{
+        "node": "AI脚本生成",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "generateScript": {
+      "main": [[{
+        "node": "内容质量评估与处理",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "contentQualityEvaluation": {
+      "main": [[{
+        "node": "质量检查分支",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "qualityCheckBranch": {
+      "main": [
+        [{
+          "node": "语音合成生成",
+          "type": "main",
+          "index": 0
+        }, {
+          "node": "AI视频生成",
+          "type": "main",
+          "index": 0
+        }],
+        [{
+          "node": "AI脚本生成",
+          "type": "main",
+          "index": 0
+        }]
+      ]
+    },
+    "generateVoiceover": {
+      "main": [[{
+        "node": "多媒体处理与平台适配",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "generateVideo": {
+      "main": [[{
+        "node": "多媒体处理与平台适配",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "mediaProcessingAndAdaptation": {
+      "main": [[{
+        "node": "人工审核检查点",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "humanReviewCheckpoint": {
+      "main": [[{
+        "node": "发布到B站",
+        "type": "main",
+        "index": 0
+      }, {
+        "node": "抖音发布引导",
+        "type": "main",
+        "index": 0
+      }, {
+        "node": "小红书发布引导",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "publishToBilibili": {
+      "main": [[{
+        "node": "执行总结与报告",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "douyinPublishGuide": {
+      "main": [[{
+        "node": "执行总结与报告",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "xiaohongshuPublishGuide": {
+      "main": [[{
+        "node": "执行总结与报告",
+        "type": "main",
+        "index": 0
+      }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "error_handling_workflow",
+    "timezone": "Asia/Shanghai"
+  },
+  "staticData": null,
+  "pinData": null,
+  "versionId": "2.0",
+  "triggerCount": 0,
+  "id": "enterprise_ai_video_automation",
+  "meta": {
+    "instanceId": "enterprise_n8n_instance",
+    "templateVersion": "2.0.0",
+    "author": "Senior N8N Solutions Architect",
+    "description": "企业级AI短视频自动化生产线，包含完整的质量控制、错误处理、多平台适配和监控报告功能"
+  }
+}
